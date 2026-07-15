@@ -82,4 +82,4 @@ def test_special_event_check_rates(avg_player, elite_player):
 
 def test_special_event_check_invalid_type(avg_player):
     with pytest.raises(Exception):
-        special_event_check(avg_player, "invalid_type")
+        special_event_check(avg_player, "invalid_type") 
