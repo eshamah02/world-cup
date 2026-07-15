@@ -1,8 +1,18 @@
 
 import pandas as pd
-from player_profile import PlayerProfile
+import random
+from app.player_profile import PlayerProfile
+from typing import List
 
 FILE_PATH = 'data/fc26_sofifa_player_stats.csv'
+
+INT_FIELDS = [
+    'player_id', 'height_cm', 'weight_kg', 'overall_rating', 'potential', 'value', 'wage', 'weak_foot', 'skill_moves', 'international_reputation',
+    'club_kit_number', 'country_kit_number', 'crossing', 'finishing', 'heading_accuracy', 'short_passing', 'volleys',
+    'dribbling', 'curve', 'fk_accuracy', 'long_passing', 'ball_control', 'acceleration', 'sprint_speed', 'agility', 'reactions', 'balance',
+    'shot_power', 'jumping', 'stamina', 'strength', 'long_shots', 'aggression', 'interceptions', 'vision', 'penalties', 'composure',
+    'attack_position', 'defensive_awareness', 'standing_tackle', 'sliding_tackle', 'gk_diving', 'gk_handling', 'gk_kicking', 'gk_positioning', 'gk_reflexes',
+]
 
 COLUMN_MAP = {
     "player_id": "player_id",
@@ -92,33 +102,67 @@ _players = {}
 def parse_list(value, strip_hash=False) -> list[str]:
     if not isinstance(value, str):
         return []
+    items = [item.strip() for item in value.split(',')]
     if strip_hash:
-        value = value.lstrip('#')
-    return [item.strip() for item in value.split(',') if item.strip()]
+        items = [item.lstrip('#') for item in items]
+    return items
 
-def load_from_path(file_path: str) -> pd.DataFrame:
-    df = pd.read_csv(file_path)
-    df = _clean(df)
-    print(df.head())
-    return df
-
-def _clean(df: pd.DataFrame) -> pd.DataFrame:
-    # Remove rows with missing required columns
-    df = df.dropna(subset=REQUIRED_COLUMNS)
-
-    # Convert numeric columns to numeric type
-    for col in NUMERIC_COLUMNS:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-            df[col] = df[col].fillna(0, inplace=True)
-
-    # Remove rows with invalid data (e.g., negative minutes played)
-    df = df[df['minutes_played'] >= 0]
-
-    # Turn match_date column into datetime type
-    df['match_date'] = pd.to_datetime(df['match_date'], errors='coerce')
-
-    return df
+def _row_to_player(row: pd.Series) -> PlayerProfile:
+    """Converts a pandas row to a PlayerProfile object."""
+    player_data = {}
+    for sofifa_key, field_name in COLUMN_MAP.items():
+        value = row[sofifa_key]
+        if field_name in INT_FIELDS:
+            try:
+                value = int(float(value)) if pd.notna(value) and str(value).strip() != '' else 0
+            except (ValueError, TypeError):
+                value = 0
+        elif field_name == 'positions':
+            value = parse_list(value)
+        elif field_name == 'specialities' or field_name == 'play_styles':
+            value = parse_list(value, strip_hash=True)
+        elif isinstance(value, float) and pd.isna(value):
+            value = ""
+        player_data[field_name] = value
+    return PlayerProfile(**player_data)
 
 
-load_from_path(FILE_PATH)
+def load_players(path: str=FILE_PATH) -> dict[int, PlayerProfile]:
+    if not path:
+        path = FILE_PATH
+    df = pd.read_csv(path)
+    for index, row in df.iterrows():
+        try:
+            profile = _row_to_player(row)
+            _players[profile.player_id] = profile
+        except Exception as e:
+            print(f"Error processing row {index}: {e}")
+            continue
+    return _players
+
+def get_player(player_id: int, path: str=FILE_PATH) -> PlayerProfile:
+    if player_id not in _players:
+        raise ValueError(f"Player with id {player_id} not found.")
+
+    return _players.get(player_id)
+
+
+def get_all_players(path: str=FILE_PATH) -> List[PlayerProfile]:
+    if _players:
+        return list(_players.values())
+    else:
+        load_players(path)
+        return list(_players.values())
+    
+def search_players(query: str) -> List[PlayerProfile]:
+    q = query.lower()
+    matches = [player for player in _players.values() 
+               if q in player.name.lower()
+               or (isinstance(player.club_name, str) and q in player.club_name.lower())
+               or (isinstance(player.country_name, str) and q in player.country_name.lower())
+               ]
+    return matches
+
+def get_random_players(n: int = 3) -> List[PlayerProfile]:
+    if _players:
+        return random.sample(list(_players.values()), k=n)
