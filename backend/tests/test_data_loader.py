@@ -4,9 +4,6 @@ from app.data_loader import load_players, get_player, get_all_players, search_pl
 # Run pytest test/test_data_loader.py -v
 # to test with this file
 
-@pytest.fixture(autouse=True, scope="session")
-def setup():
-    load_players()
 
 def test_players_load():
     players = get_all_players()
