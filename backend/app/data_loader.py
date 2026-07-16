@@ -124,6 +124,9 @@ def _row_to_player(row: pd.Series) -> PlayerProfile:
         elif isinstance(value, float) and pd.isna(value):
             value = ""
         player_data[field_name] = value
+        
+    # Normalizing skill moves field
+    player_data['skill_moves'] = player_data['skill_moves'] * 20
     return PlayerProfile(**player_data)
 
 

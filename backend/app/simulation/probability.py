@@ -41,7 +41,7 @@ def shot_quality(creation_method: str, shooter: PlayerProfile) -> float:
 
 def special_event_check(player: PlayerProfile, event_type: str) -> bool:
     if event_type == "brilliance":
-        chance = (player.overall_rating + player.skill_moves * 10 + player.composure) / 3000
+        chance = (player.overall_rating + player.skill_moves + player.composure) / 9000
     elif event_type == "error":
         chance = (200 - player.composure - player.ball_control) / 3000
     else:

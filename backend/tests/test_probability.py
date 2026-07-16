@@ -15,7 +15,7 @@ def avg_player():
 def elite_player():
     p = get_player(231747)
     p.overall = 91
-    p.skill_moves = 5
+    p.skill_moves = 100
     p.composure = 88
     return p
 
