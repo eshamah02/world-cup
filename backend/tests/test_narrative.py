@@ -1,5 +1,5 @@
 import pytest
-from app.simulation.narrative import narrate_event
+from app.simulation.narrative import narrate_event, short_name
 from app.simulation.phases import GameState
 from app.simulation.events import PassAttempt, DribbleAttempt, ShotAttempt, SetPiece, PhysicalDuel, SpecialEvent
 
@@ -97,3 +97,22 @@ def test_narrate_never_crashes_on_any_pass_type(gs):
             event = PassAttempt(phase=1, zone="midfield", passer="Mbappé", target="teammate", pass_type=pass_type, success=success)
             text = narrate_event(event, gs)
             assert isinstance(text, str)
+
+def test_short_name_two_word_unchanged():
+    assert short_name("Kylian Mbappé") == "Kylian Mbappé"
+
+def test_short_name_three_word_first_last():
+    assert short_name("Bruno Miguel Fernandes") == "Bruno Fernandes"
+
+def test_short_name_keeps_particle():
+    assert short_name("Kevin De Bruyne") == "Kevin De Bruyne"
+    assert short_name("Virgil van Dijk") == "Virgil van Dijk"
+
+def test_short_name_long_name_with_particle():
+    assert short_name("Vinícius José de Oliveira Júnior") == "Vinícius Júnior"
+
+def test_narrate_set_piece_no_underscore(gs):
+    event = SetPiece(phase=1, zone="set_piece", taker="Mbappé", piece_type="free_kick", outcome="save")
+    text = narrate_event(event, gs)
+    assert "free_kick" not in text
+    assert "free kick" in text or "Mbappé" in text

@@ -2,9 +2,9 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from data_loader import load_players, get_player, search_players, get_all_players
-from models import MatchRequest, MatchResponse, MatchEvent, PlayerSummary
-from simulation.engine import simulate_match
+from app.data_loader import load_players, get_player, search_players, get_all_players
+from app.models import MatchRequest, MatchResponse, MatchEvent, PlayerSummary
+from app.simulation.engine import simulate_match
 
 from dataclasses import asdict
 from contextlib import asynccontextmanager
@@ -16,12 +16,13 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title='World-Cup', version='1.0.0', lifespan=lifespan)
-app.add_middleware(CORSMiddleware(
+app.add_middleware(
+    CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-))
+)
 
 
 @app.get("/players/search")

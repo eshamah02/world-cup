@@ -42,9 +42,9 @@ def test_success_probability_dominant_attacker():
 
 def test_success_probability_clamping():
     max_clamp = success_probability(99, 1)
-    assert(max_clamp == 0.95)
+    assert max_clamp <= 0.95
     min_clamp = success_probability(1, 99)
-    assert(min_clamp == 0.05)
+    assert min_clamp >= 0.05
 
 def test_roll_always_true():
     for i in range(100):

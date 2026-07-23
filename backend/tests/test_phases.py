@@ -97,6 +97,30 @@ def test_resolve_action_foul_sets_set_piece_zone(strong_team, weak_team):
             fouls += 1
     assert fouls >= 0
 
+def test_resolve_action_physical_duel_success_advances_zone(strong_team, weak_team):
+    successes = 0
+    for _ in range(100):
+        gs = GameState(zone="midfield", possessing_team=0)
+        result = resolve_action("physical_duel", strong_team[0], weak_team[0], gs, strong_team, weak_team)
+        event = result[0] if isinstance(result, list) else result
+        if event.winner == strong_team[0].name:
+            assert gs.zone == "final_third"
+            assert gs.possessing_team == 0
+            successes += 1
+    assert successes > 0
+
+def test_resolve_action_physical_duel_fail_flips_possession(strong_team, weak_team):
+    flips = 0
+    for _ in range(100):
+        gs = GameState(zone="midfield", possessing_team=0)
+        result = resolve_action("physical_duel", strong_team[0], weak_team[0], gs, strong_team, weak_team)
+        event = result[0] if isinstance(result, list) else result
+        if event.winner == weak_team[0].name:
+            assert gs.possessing_team == 1
+            assert gs.zone == "midfield"
+            flips += 1
+    assert flips >= 0
+
 def test_resolve_action_long_ball_success_jumps_to_final_third(strong_team, weak_team):
     successes = 0
     for _ in range(100):
@@ -123,7 +147,7 @@ def test_resolve_action_cutback_sets_assisted(strong_team, weak_team):
         gs = GameState(zone="final_third", possessing_team=0)
         event = resolve_action("cutback", strong_team[0], weak_team[0], gs, strong_team, weak_team)
         if event.success:
-            assert gs.assisted == True
+            assert gs.cutback_assisted == True
             successes += 1
     assert successes > 0
 

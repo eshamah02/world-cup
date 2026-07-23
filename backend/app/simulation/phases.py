@@ -15,8 +15,12 @@ class GameState:
     total_phases: int = 25
     momentum: list[int] = field(default_factory=lambda: [0, 0]) # consecutive possession phases per team
     last_event: str = "" # pass, dribble, shot
-    assisted: bool = False # did a cutback just happen? if so next shot gets quality boost
-    set_piece_team: str = "" # which team was fouled?
+    cutback_assisted: bool = False # did a cutback just set up a premium chance?
+    dribble_assisted: bool = False # did a dribble_into_box just set up a premium chance?
+    set_piece_type: str = "free_kick" # free_kick or corner
+    last_ball_carrier: str = "" # name of player who had the ball at end of last phase
+    through_ball_receiver: str = "" # name of player who should carry the ball next phase after a successful through ball or cutback
+    team_names: list[str] = field(default_factory=lambda: ["team A", "team B"]) # display names for each team
 
 
 
@@ -63,17 +67,31 @@ def select_action(ball_carrier: PlayerProfile, game_state: GameState) -> str:
         "header": ["heading_accuracy", "jumping"]
     }
 
+    # if assisted flag is set, force a shot immediately
+    if (game_state.cutback_assisted or game_state.dribble_assisted) and game_state.zone == "final_third":
+        shot_actions = ["finesse_shot", "power_shot", "header"]
+        shot_weights = []
+        for action in shot_actions:
+            w = sum(getattr(ball_carrier, s) for s in action_stats[action])
+            shot_weights.append(w)
+        return random.choices(shot_actions, weights=shot_weights, k=1)[0]
+
     weights = [0] * len(zone_actions[game_state.zone])
     for idx, action in enumerate(zone_actions[game_state.zone]):
         for stat in action_stats[action]:
             weights[idx] += getattr(ball_carrier, stat)
 
-    # if possessing team is losing and we're in the third quarter of the game, then intensify the finesse shots, power shots, and headers
+    # reduce switch_play weight to 40% to prevent it dominating midfield
+    if game_state.zone == "midfield":
+        switch_idx = zone_actions["midfield"].index("switch_play")
+        weights[switch_idx] *= 0.4
+
+    # if possessing team is losing and we're in the last quarter, intensify shots
     if game_state.score[game_state.possessing_team] < game_state.score[1 - game_state.possessing_team] and game_state.phase_number > game_state.total_phases * 0.75:
         for idx, action in enumerate(zone_actions[game_state.zone]):
             if action in ["finesse_shot", "power_shot", "header"]:
                 weights[idx] *= 1.5
-    
+
     return random.choices(zone_actions[game_state.zone], weights=weights, k=1)[0]
 
 
@@ -88,7 +106,8 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
         atk = compute_composite(ball_carrier, ["short_passing", "ball_control", "composure"])
         dfn = compute_composite(defender, ["interceptions", "reactions", "defensive_awareness"])
         succeeded = roll(success_probability(atk, dfn))
-        
+        rest = [p for p in possessing_team if p.player_id != ball_carrier.player_id]
+        target_name = pick_ball_carrier(rest, current_zone).name if rest else ball_carrier.name
         if succeeded:
             game_state.zone = ZONE_ORDER[min(ZONE_ORDER.index(current_zone) + 1, 2)]
         else:
@@ -98,17 +117,22 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
             phase=game_state.phase_number,
             zone=current_zone,
             passer=ball_carrier.name,
-            target="teammate",
+            target=target_name,
             pass_type="short",
-            success=succeeded
+            success=succeeded,
+            turnover_player=defender.name if not succeeded else "",
+            score=game_state.score[:]
         )
     elif action == "long_ball":
         current_zone = game_state.zone
         atk = compute_composite(ball_carrier, ["long_passing", "vision"])
         dfn = compute_composite(defender, ["reactions", "sprint_speed", "jumping"])
         succeeded = roll(success_probability(atk, dfn))
+        rest = [p for p in possessing_team if p.player_id != ball_carrier.player_id]
+        target_name = pick_ball_carrier(rest, "final_third").name if rest else ball_carrier.name
         if succeeded:
             game_state.zone = "final_third"
+            game_state.through_ball_receiver = target_name  # lock in the named runner
         else:
             game_state.possessing_team = 1 - game_state.possessing_team
             game_state.zone = "midfield"
@@ -116,22 +140,23 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
             phase=game_state.phase_number,
             zone=current_zone,
             passer=ball_carrier.name,
-            target="teammate",
+            target=target_name,
             pass_type="long",
-            success=succeeded
+            success=succeeded,
+            turnover_player=defender.name if not succeeded else "",
+            score=game_state.score[:]
         )
     elif action == "through_ball":
         current_zone = game_state.zone
         atk = compute_composite(ball_carrier, ["vision", "short_passing", "composure"])
         dfn = compute_composite(defender, ["defensive_awareness", "reactions", "sprint_speed"])
         succeeded = roll(success_probability(atk, dfn))
-        receiver_name = "teammate"
+        rest = [p for p in possessing_team if p.player_id != ball_carrier.player_id]
+        receiver = pick_ball_carrier(rest, "final_third") if rest else ball_carrier
+        receiver_name = receiver.name
         if succeeded:
             game_state.zone = "final_third"
-            rest = [p for p in possessing_team if p.player_id != ball_carrier.player_id]
-            if rest:
-                receiver = pick_ball_carrier(rest, "final_third")
-                receiver_name = receiver.name
+            game_state.through_ball_receiver = receiver_name
         else:
             game_state.possessing_team = 1 - game_state.possessing_team
             game_state.zone = "midfield"
@@ -141,13 +166,17 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
             passer=ball_carrier.name,
             target=receiver_name,
             pass_type="through_ball",
-            success=succeeded
+            success=succeeded,
+            turnover_player=defender.name if not succeeded else "",
+            score=game_state.score[:]
         )
     elif action == "switch_play":
         current_zone = game_state.zone
         atk = compute_composite(ball_carrier, ["long_passing", "vision"])
         dfn = compute_composite(defender, ["acceleration", "reactions", "sprint_speed"])
         succeeded = roll(success_probability(atk, dfn))
+        rest = [p for p in possessing_team if p.player_id != ball_carrier.player_id]
+        target_name = pick_ball_carrier(rest, "buildup").name if rest else ball_carrier.name
         if succeeded:
             game_state.zone = "buildup"
         else:
@@ -157,9 +186,11 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
             phase=game_state.phase_number,
             zone=current_zone,
             passer=ball_carrier.name,
-            target="teammate",
+            target=target_name,
             pass_type="switch",
-            success=succeeded
+            success=succeeded,
+            turnover_player=defender.name if not succeeded else "",
+            score=game_state.score[:]
         )
     elif action == "dribble_carry":
         current_zone = game_state.zone
@@ -173,6 +204,7 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
             foul = roll(defender.aggression / 200)
             if foul:
                 game_state.zone = "set_piece"
+                game_state.set_piece_type = "free_kick"
             else:
                 game_state.possessing_team = 1 - game_state.possessing_team
                 game_state.zone = "midfield"
@@ -182,7 +214,9 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
             dribbler=ball_carrier.name,
             defender=defender.name,
             success=succeeded,
-            foul=foul
+            foul=foul,
+            turnover_player=defender.name if not succeeded and not foul else "",
+            score=game_state.score[:]
         )
     elif action == "skill_move":
         current_zone = game_state.zone
@@ -191,11 +225,12 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
         succeeded = roll(success_probability(atk, dfn))
         foul = False
         if succeeded:
-            game_state.zone = "final_third"
+            game_state.zone = ZONE_ORDER[min(ZONE_ORDER.index(current_zone) + 1, 2)]
         else:
             foul = roll(defender.aggression / 200)
             if foul:
                 game_state.zone = "set_piece"
+                game_state.set_piece_type = "free_kick"
             else:
                 game_state.possessing_team = 1 - game_state.possessing_team
                 game_state.zone = "midfield"
@@ -205,7 +240,9 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
             dribbler=ball_carrier.name,
             defender=defender.name,
             success=succeeded,
-            foul=foul
+            foul=foul,
+            turnover_player=defender.name if not succeeded and not foul else "",
+            score=game_state.score[:]
         )
     elif action == "dribble_into_box":
         current_zone = game_state.zone
@@ -215,11 +252,12 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
         foul = False
         if succeeded:
             game_state.zone = "final_third"
-            game_state.assisted = True
+            game_state.dribble_assisted = True
         else:
             foul = roll(defender.aggression / 200)
             if foul:
                 game_state.zone = "set_piece"
+                game_state.set_piece_type = "free_kick"
             else:
                 game_state.possessing_team = 1 - game_state.possessing_team
                 game_state.zone = "midfield"
@@ -229,7 +267,9 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
             dribbler=ball_carrier.name,
             defender=defender.name,
             success=succeeded,
-            foul=foul
+            foul=foul,
+            turnover_player=defender.name if not succeeded and not foul else "",
+            score=game_state.score[:]
         )
     elif action == "physical_duel":
         current_zone = game_state.zone
@@ -238,24 +278,43 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
         succeeded = roll(success_probability(atk, dfn))
         if succeeded:
             game_state.zone = ZONE_ORDER[min(ZONE_ORDER.index(current_zone) + 1, 2)]
+            game_state.last_ball_carrier = ""  # zone jumped — next phase starts fresh
         else:
             game_state.possessing_team = 1 - game_state.possessing_team
         winner = ball_carrier.name if succeeded else defender.name
-        return PhysicalDuel(
+        score_snap = game_state.score[:]
+        duel_event = PhysicalDuel(
             phase=game_state.phase_number,
             zone=current_zone,
             player_a=ball_carrier.name,
             player_b=defender.name,
-            winner=winner
+            winner=winner,
+            score=score_snap
         )
+        if succeeded:
+            # emit a carry event to bridge the zone jump narratively
+            carry_event = DribbleAttempt(
+                phase=game_state.phase_number,
+                zone=game_state.zone,
+                dribbler=ball_carrier.name,
+                defender="",
+                success=True,
+                foul=False,
+                score=score_snap
+            )
+            return [duel_event, carry_event]
+        return duel_event
     elif action == "cutback":
         current_zone = game_state.zone
         atk = compute_composite(ball_carrier, ["short_passing", "vision", "composure"])
         dfn = compute_composite(defender, ["interceptions", "reactions"])
         succeeded = roll(success_probability(atk, dfn))
+        rest = [p for p in possessing_team if p.player_id != ball_carrier.player_id]
+        target_name = pick_ball_carrier(rest, "final_third").name if rest else ball_carrier.name
         if succeeded:
-            game_state.assisted = True
-            # zone stays "final_third", possession stays
+            game_state.cutback_assisted = True
+            game_state.through_ball_receiver = target_name  # lock in the named recipient as shooter
+            game_state.last_ball_carrier = ball_carrier.name  # suppress bridging pass next phase
         else:
             game_state.possessing_team = 1 - game_state.possessing_team
             game_state.zone = "midfield"
@@ -263,9 +322,11 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
             phase=game_state.phase_number,
             zone=current_zone,
             passer=ball_carrier.name,
-            target="teammate",
+            target=target_name,
             pass_type="cutback",
-            success=succeeded
+            success=succeeded,
+            turnover_player=defender.name if not succeeded else "",
+            score=game_state.score[:]
         )
     elif action in ("finesse_shot", "power_shot", "header"):
         current_zone = game_state.zone
@@ -275,9 +336,10 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
             "header": "header"
         }
         quality = shot_quality(creation_map[action], ball_carrier)
-        if game_state.assisted:
+        if game_state.cutback_assisted or game_state.dribble_assisted:
             quality = min(0.85, quality + 0.15)
-            game_state.assisted = False
+            game_state.cutback_assisted = False
+            game_state.dribble_assisted = False
         is_goal = roll(quality)
         if is_goal:
             outcome = "goal"
@@ -298,24 +360,23 @@ def resolve_action(action: str, ball_carrier: PlayerProfile, defender: PlayerPro
             shot_type=action,
             quality=quality,
             outcome=outcome,
-            assister=None
+            assister=None,
+            score=game_state.score[:]
         )
 
 def resolve_set_piece(possessing_team: list[PlayerProfile], defending_team: list[PlayerProfile], game_state: GameState) -> GameEvent:
     taker = max(possessing_team, key=lambda p: p.fk_accuracy)
     aerial_defender = max(defending_team, key=lambda p: p.jumping + p.heading_accuracy)
-    is_direct = roll(0.5)
+    piece_type = game_state.set_piece_type
 
-    if is_direct:
-        piece_type = "free_kick"
+    if piece_type == "free_kick":
         quality = shot_quality("free_kick", taker)
         if roll(quality):
             outcome = "goal"
             game_state.score[game_state.possessing_team] += 1
         else:
             outcome = "save"
-    else:
-        piece_type = "corner"
+    else:  # corner
         delivery = compute_composite(taker, ["crossing", "curve"])
         defense = compute_composite(aerial_defender, ["jumping", "heading_accuracy"])
         if roll(success_probability(delivery, defense)):
@@ -349,52 +410,119 @@ def resolve_phase(game_state: GameState, team_a: list[PlayerProfile], team_b: li
 
     if game_state.zone == "set_piece":
         event = resolve_set_piece(attacking_team, defending_team, game_state)
+        event.score = game_state.score[:]
+        game_state.last_ball_carrier = ""
+        game_state.through_ball_receiver = ""
+        game_state.cutback_assisted = False
+        game_state.dribble_assisted = False
         game_state.phase_number += 1
         return [event]
     
     ball_carrier = pick_ball_carrier(attacking_team, game_state.zone)
+    # if a through ball named a specific receiver last phase, lock them in as ball carrier
+    if game_state.through_ball_receiver:
+        locked = next((p for p in attacking_team if p.name == game_state.through_ball_receiver), None)
+        if locked:
+            ball_carrier = locked
+        game_state.through_ball_receiver = ""
+        game_state.last_ball_carrier = ball_carrier.name  # suppress bridging pass
     defender = pick_defender(defending_team)
 
     if special_event_check(ball_carrier, "brilliance"):
+        current_zone = game_state.zone
         game_state.score[game_state.possessing_team] += 1
         game_state.zone = "midfield"
         game_state.possessing_team = 1 - game_state.possessing_team
-        game_state.phase_number += 1
-        return [SpecialEvent(
+        game_state.last_ball_carrier = ""
+        game_state.through_ball_receiver = ""
+        game_state.cutback_assisted = False
+        game_state.dribble_assisted = False
+        event = SpecialEvent(
             phase=game_state.phase_number,
-            zone=game_state.zone,
+            zone=current_zone,
             player=ball_carrier.name,
             special_type="brilliance",
             description="solo_run",
-            resulted_in_goal=True
-        )]
+            resulted_in_goal=True,
+            score=game_state.score[:]
+        )
+        game_state.phase_number += 1
+        return [event]
 
     if special_event_check(ball_carrier, "error"):
+        current_zone = game_state.zone
         game_state.possessing_team = 1 - game_state.possessing_team
         game_state.zone = "midfield"
-        game_state.phase_number += 1
-        return [SpecialEvent(
+        game_state.last_ball_carrier = ""
+        game_state.through_ball_receiver = ""
+        game_state.cutback_assisted = False
+        game_state.dribble_assisted = False
+        event = SpecialEvent(
             phase=game_state.phase_number,
-            zone=game_state.zone,
+            zone=current_zone,
             player=ball_carrier.name,
             special_type="error",
             description="misplaced_backpass",
-            resulted_in_goal=False
-        )]
+            resulted_in_goal=False,
+            score=game_state.score[:]
+        )
+        game_state.phase_number += 1
+        return [event]
     
     team_before = game_state.possessing_team  # snapshot BEFORE resolve_action
+
+    # if the ball carrier changed within the same possession, emit a bridging pass
+    # suppress only on cutback_assisted — the cutback text already named the setup
+    # dribble_assisted does NOT suppress — dribble_into_box names no recipient
+    events = []
+    if game_state.last_ball_carrier and game_state.last_ball_carrier != ball_carrier.name and not game_state.cutback_assisted:
+        events.append(PassAttempt(
+            phase=game_state.phase_number,
+            zone=game_state.zone,
+            passer=game_state.last_ball_carrier,
+            target=ball_carrier.name,
+            pass_type="short",
+            success=True,
+            score=game_state.score[:]
+        ))
+
     action = select_action(ball_carrier, game_state)
-    event = resolve_action(action, ball_carrier, defender, game_state, team_a, team_b)
+    result = resolve_action(action, ball_carrier, defender, game_state, team_a, team_b)
+    if isinstance(result, list):
+        events.extend(result)
+    else:
+        events.append(result)
 
     # now update momentum
     if game_state.possessing_team == team_before:
-        # possession stayed — increment momentum for that team
         game_state.momentum[team_before] += 1
+        # for successful passes, the ball is now with the target — track them to avoid a duplicate bridging pass
+        # through_ball and long_ball use through_ball_receiver for continuity, so exclude them here
+        last_event = events[-1] if events else None
+        if isinstance(last_event, PassAttempt) and last_event.success and last_event.pass_type not in ("cutback", "through_ball", "long"):
+            game_state.last_ball_carrier = last_event.target
+        else:
+            game_state.last_ball_carrier = ball_carrier.name
     else:
-        # possession flipped — reset the team that just lost it
         game_state.momentum[team_before] = 0
         game_state.momentum[game_state.possessing_team] += 1
+        game_state.last_ball_carrier = ""
+        game_state.through_ball_receiver = ""
+        game_state.cutback_assisted = False
+        game_state.dribble_assisted = False
+        # for duel losses, append a short "wins it back" line naming the new possessing team
+        last_event = events[-1] if events else None
+        if isinstance(last_event, PhysicalDuel):
+            winning_team_label = "team_a" if game_state.possessing_team == 0 else "team_b"
+            events.append(PossessionChange(
+                phase=game_state.phase_number,
+                zone=game_state.zone,
+                player=last_event.winner,
+                method="duel",
+                team=game_state.possessing_team,
+                score=game_state.score[:]
+            ))
 
     game_state.phase_number += 1
-    return [event]
+    return events
 

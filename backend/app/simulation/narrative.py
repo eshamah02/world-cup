@@ -1,18 +1,38 @@
 import random
-from app.simulation.events import PassAttempt, DribbleAttempt, ShotAttempt, SetPiece, PhysicalDuel, SpecialEvent, GameEvent
+from app.simulation.events import PassAttempt, DribbleAttempt, ShotAttempt, SetPiece, PhysicalDuel, SpecialEvent, PossessionChange, GameEvent
 from app.simulation.phases import GameState
+
+
+PARTICLES = {"de", "van", "von", "di", "da", "dos", "del", "der", "le", "la"}
+
+
+def short_name(name: str) -> str:
+    parts = name.split()
+    if len(parts) <= 2:
+        return name
+    # find the last meaningful surname token, keeping particles attached
+    # walk backwards to find where the surname starts (first particle or last word)
+    surname_start = len(parts) - 1
+    while surname_start > 1 and parts[surname_start - 1].lower() in PARTICLES:
+        surname_start -= 1
+    return f"{parts[0]} {' '.join(parts[surname_start:])}"
 
 TEMPLATES = {
     # --- PASS ---
     ("pass", "short"): [
         "{passer} plays it simple to {target}.",
-        "{passer} keeps it moving with a short pass.",
+        "{passer} keeps it ticking, finds {target}.",
         "Quick ball from {passer} to {target}.",
     ],
     ("pass", "short_fail"): [
         "{passer}'s pass is cut out.",
         "Sloppy ball from {passer}, intercepted.",
         "{passer} gives it away with a loose pass.",
+    ],
+    ("pass", "short_fail_turnover"): [
+        "{turnover_player} intercepts {passer}'s pass and {team} are on the attack.",
+        "{turnover_player} reads it perfectly — {team} win possession.",
+        "Stolen by {turnover_player}! {team} break forward.",
     ],
     ("pass", "long"): [
         "{passer} launches it long — {target} is in behind!",
@@ -24,6 +44,11 @@ TEMPLATES = {
         "The long ball from {passer} doesn't find anyone.",
         "Overhit from {passer}, possession lost.",
     ],
+    ("pass", "long_fail_turnover"): [
+        "{turnover_player} wins the aerial duel and {team} have it.",
+        "{passer}'s long ball is claimed by {turnover_player} — {team} in possession.",
+        "{turnover_player} picks it up and {team} are away.",
+    ],
     ("pass", "through_ball"): [
         "{passer} threads it through to {target} — brilliant ball!",
         "Incisive through ball from {passer}, {target} is clean through.",
@@ -34,25 +59,40 @@ TEMPLATES = {
         "The through ball from {passer} is intercepted.",
         "{passer} attempts the killer pass but it's cut out.",
     ],
+    ("pass", "through_ball_fail_turnover"): [
+        "{turnover_player} reads the through ball and {team} break.",
+        "Intercepted by {turnover_player}! {team} counter.",
+        "{turnover_player} cuts it out — {team} on the counter-attack.",
+    ],
     ("pass", "switch"): [
-        "{passer} switches the play, opening up space.",
-        "Nice switch from {passer} to change the angle.",
-        "{passer} moves it wide with a diagonal ball.",
+        "{passer} switches the play to {target}, opening up space.",
+        "Nice switch from {passer} to {target} to change the angle.",
+        "{passer} moves it wide to {target} with a diagonal ball.",
     ],
     ("pass", "switch_fail"): [
-        "{passer}'s switch is intercepted.",
+        "{passer}'s switch intended for {target} is intercepted.",
         "The switch from {passer} doesn't come off.",
         "Turnover — {passer}'s diagonal ball is picked off.",
     ],
+    ("pass", "switch_fail_turnover"): [
+        "{turnover_player} intercepts the switch and {team} are on the move.",
+        "Picked off by {turnover_player} — {team} win it back.",
+        "{turnover_player} reads the diagonal and {team} have possession.",
+    ],
     ("pass", "cutback"): [
-        "{passer} cuts it back for a teammate — dangerous!",
-        "Smart cutback from {passer} across the face of goal.",
-        "{passer} pulls it back, setting up a chance.",
+        "{passer} cuts it back for {target} — dangerous!",
+        "Smart cutback from {passer} to {target} across the face of goal.",
+        "{passer} pulls it back for {target}, setting up a chance.",
     ],
     ("pass", "cutback_fail"): [
         "{passer} tries the cutback but it's blocked.",
         "The cutback from {passer} is cleared.",
         "{passer}'s pullback is intercepted.",
+    ],
+    ("pass", "cutback_fail_turnover"): [
+        "{turnover_player} blocks the cutback — {team} clear their lines.",
+        "Cleared by {turnover_player}! {team} break out.",
+        "{turnover_player} intercepts the pullback and {team} are away.",
     ],
 
     # --- DRIBBLE ---
@@ -62,10 +102,20 @@ TEMPLATES = {
         "Beautiful footwork from {dribbler}, {defender} can't live with it.",
         "{dribbler} beats {defender} and drives forward.",
     ],
+    ("dribble", "carry"): [
+        "{dribbler} surges forward into the final third.",
+        "{dribbler} drives into a dangerous position.",
+        "{dribbler} bursts forward with the ball.",
+    ],
     ("dribble", "fail"): [
         "{defender} stands firm and wins the ball from {dribbler}.",
         "Good defending from {defender}, stops {dribbler} in their tracks.",
         "{dribbler} tries to go past {defender} but loses it.",
+    ],
+    ("dribble", "fail_turnover"): [
+        "{turnover_player} takes it off {dribbler} — {team} on the attack.",
+        "{turnover_player} wins it cleanly from {dribbler} and {team} break forward.",
+        "{dribbler} loses it — {turnover_player} pounces for {team}.",
     ],
     ("dribble", "foul"): [
         "{defender} can't stop {dribbler} fairly — foul given!",
@@ -108,6 +158,13 @@ TEMPLATES = {
         "{winner} wins the 50/50 against {loser}.",
     ],
 
+    # --- POSSESSION CHANGE (duel win) ---
+    ("possession_change", "duel"): [
+        "{player} wins it back for {team}.",
+        "{player} claims possession — {team} are on the attack.",
+        "{team} have it now, {player} winning the ball.",
+    ],
+
     # --- SET PIECE ---
     ("set_piece", "goal"): [
         "{taker} curls it in — straight from the set piece! GOAL!",
@@ -138,43 +195,73 @@ TEMPLATES = {
     ],
 }
 
+_TEAM_LABELS = {0: "team A", 1: "team B"}
+
+
+def _team_label(game_state: GameState, team_idx: int) -> str:
+    return game_state.team_names[team_idx] if hasattr(game_state, "team_names") and len(game_state.team_names) > team_idx else _TEAM_LABELS[team_idx]
+
 
 def narrate_event(event: GameEvent, game_state: GameState) -> str:
     if isinstance(event, PassAttempt):
         if event.success:
             key = ("pass", event.pass_type)
+            templates = TEMPLATES.get(key)
+            if not templates:
+                return f"{event.passer} plays a {event.pass_type} pass."
+            return random.choice(templates).format(passer=short_name(event.passer), target=short_name(event.target))
         else:
-            key = ("pass", f"{event.pass_type}_fail")
-        templates = TEMPLATES.get(key)
-        if not templates:
-            return f"{event.passer} plays a {event.pass_type} pass."
-        return random.choice(templates).format(passer=event.passer, target=event.target)
+            turnover_key = ("pass", f"{event.pass_type}_fail_turnover")
+            base_key = ("pass", f"{event.pass_type}_fail")
+            if event.turnover_player and TEMPLATES.get(turnover_key):
+                team_label = _team_label(game_state, game_state.possessing_team)
+                return random.choice(TEMPLATES[turnover_key]).format(
+                    passer=short_name(event.passer),
+                    target=short_name(event.target),
+                    turnover_player=short_name(event.turnover_player),
+                    team=team_label,
+                )
+            templates = TEMPLATES.get(base_key)
+            if not templates:
+                return f"{event.passer} gives it away."
+            return random.choice(templates).format(passer=short_name(event.passer), target=short_name(event.target))
 
     elif isinstance(event, DribbleAttempt):
-        if event.success:
+        if event.success and event.defender == "":
+            key = ("dribble", "carry")
+            templates = TEMPLATES.get(key, [])
+            return random.choice(templates).format(dribbler=short_name(event.dribbler))
+        elif event.success:
             key = ("dribble", "success")
         elif event.foul:
             key = ("dribble", "foul")
+        elif event.turnover_player and TEMPLATES.get(("dribble", "fail_turnover")):
+            team_label = _team_label(game_state, game_state.possessing_team)
+            return random.choice(TEMPLATES[("dribble", "fail_turnover")]).format(
+                dribbler=short_name(event.dribbler),
+                turnover_player=short_name(event.turnover_player),
+                team=team_label,
+            )
         else:
             key = ("dribble", "fail")
         templates = TEMPLATES.get(key, [])
         if not templates:
             return f"{event.dribbler} attempts a dribble."
-        return random.choice(templates).format(dribbler=event.dribbler, defender=event.defender)
+        return random.choice(templates).format(dribbler=short_name(event.dribbler), defender=short_name(event.defender))
 
     elif isinstance(event, ShotAttempt):
         key = ("shot", event.outcome)
         templates = TEMPLATES.get(key, [])
         if not templates:
             return f"{event.shooter} shoots — {event.outcome}."
-        return random.choice(templates).format(shooter=event.shooter)
+        return random.choice(templates).format(shooter=short_name(event.shooter))
 
     elif isinstance(event, SetPiece):
         key = ("set_piece", event.outcome)
         templates = TEMPLATES.get(key, [])
         if not templates:
             return f"{event.taker} takes the {event.piece_type} — {event.outcome}."
-        return random.choice(templates).format(taker=event.taker, piece_type=event.piece_type)
+        return random.choice(templates).format(taker=short_name(event.taker), piece_type=event.piece_type.replace("_", " "))
 
     elif isinstance(event, PhysicalDuel):
         loser = event.player_b if event.winner == event.player_a else event.player_a
@@ -182,13 +269,21 @@ def narrate_event(event: GameEvent, game_state: GameState) -> str:
         templates = TEMPLATES.get(key, [])
         if not templates:
             return f"{event.winner} wins the duel against {loser}."
-        return random.choice(templates).format(winner=event.winner, loser=loser)
+        return random.choice(templates).format(winner=short_name(event.winner), loser=short_name(loser))
+
+    elif isinstance(event, PossessionChange):
+        key = ("possession_change", event.method)
+        templates = TEMPLATES.get(key, [])
+        if not templates:
+            return f"{event.player} wins possession for {_team_label(game_state, event.team)}."
+        team_label = _team_label(game_state, event.team)
+        return random.choice(templates).format(player=short_name(event.player), team=team_label)
 
     elif isinstance(event, SpecialEvent):
         key = ("special", event.special_type)
         templates = TEMPLATES.get(key, [])
         if not templates:
             return f"{event.player} — {event.special_type}!"
-        return random.choice(templates).format(player=event.player)
+        return random.choice(templates).format(player=short_name(event.player))
 
     return f"Phase {event.phase}: {event.event_type}"

@@ -1,8 +1,8 @@
 from pydantic import BaseModel, Field
 
 class MatchRequest(BaseModel):
-    team_a: list[int] = Field(ge=3, le=3)
-    team_b: list[int] = Field(ge=3, le=3)
+    team_a: list[int] = Field(min_length=3, max_length=3)
+    team_b: list[int] = Field(min_length=3, max_length=3)
 
 class PlayerSummary(BaseModel):
     player_id: int 
@@ -14,13 +14,12 @@ class PlayerSummary(BaseModel):
     positions: list[str]
 
 class MatchEvent(BaseModel):
-    phase: int = Field(ge=1, le=30)
+    phase: int = Field(ge=1, le=32)
     zone: str
     event_type: str
     outcome: str
     text: str
     score: list[int]
-    players_involved: list[int] 
 
 class MatchResponse(BaseModel):
     events: list[MatchEvent]
