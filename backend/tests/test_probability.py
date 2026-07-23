@@ -14,7 +14,7 @@ def avg_player():
 @pytest.fixture
 def elite_player():
     p = get_player(231747)
-    p.overall = 91
+    p.overall_rating = 91
     p.skill_moves = 100
     p.composure = 88
     return p
@@ -71,7 +71,8 @@ def test_special_event_check_rates(avg_player, elite_player):
     elite_res = []
     for i in range(10000):
         elite_res.append(special_event_check(elite_player, "brilliance"))
-    assert(610 <= elite_res.count(True) <= 910)
+    # formula: (91 + 100 + 88) / 9000 = 0.0310 → ~310 per 10000
+    assert(200 <= elite_res.count(True) <= 450)
 
     avg_player.composure = 65
     avg_player.ball_control = 70

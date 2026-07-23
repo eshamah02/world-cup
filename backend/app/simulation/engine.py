@@ -21,7 +21,7 @@ def simulate_match(team_a: list[PlayerProfile], team_b: list[PlayerProfile]) -> 
         for event in phase_events:
             text = narrate_event(event, game_state)
             match_events.append(MatchEvent(
-                phase=event.phase,
+                phase=event.phase + 1,
                 zone=event.zone,
                 event_type=event.event_type,
                 outcome=getattr(event, "outcome", ""),
