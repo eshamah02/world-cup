@@ -54,16 +54,19 @@ def get_player_profile(player_id: int) -> PlayerSummary:
     
     return asdict(res)
 
-@app.get("/simulate")
+@app.post("/simulate")
 def simulate(request: MatchRequest) -> MatchResponse:
-    all_players = request.team_a.extend(request.team_b)
+    all_players = request.team_a + request.team_b
     if len(all_players) != len(set(all_players)):
         raise HTTPException(status_code=400, detail="Duplicate players in teams")
 
-    res = simulate_match(request.team_a, request.team_b)
-    
-    # TODO: build MatchResponse from result, return response
+    try:
+        team_a_players = [get_player(pid) for pid in request.team_a]
+        team_b_players = [get_player(pid) for pid in request.team_b]
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
+    return simulate_match(team_a_players, team_b_players)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, log_level="info")
