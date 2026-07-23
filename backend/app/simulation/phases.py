@@ -498,9 +498,12 @@ def resolve_phase(game_state: GameState, team_a: list[PlayerProfile], team_b: li
         game_state.momentum[team_before] += 1
         # for successful passes, the ball is now with the target — track them to avoid a duplicate bridging pass
         # through_ball and long_ball use through_ball_receiver for continuity, so exclude them here
+        # after a duel win the carry event already bridges the zone jump — start next phase fresh
         last_event = events[-1] if events else None
         if isinstance(last_event, PassAttempt) and last_event.success and last_event.pass_type not in ("cutback", "through_ball", "long"):
             game_state.last_ball_carrier = last_event.target
+        elif isinstance(last_event, DribbleAttempt) and last_event.success and last_event.defender == "":
+            game_state.last_ball_carrier = ""  # carry event — next phase picks freely
         else:
             game_state.last_ball_carrier = ball_carrier.name
     else:
