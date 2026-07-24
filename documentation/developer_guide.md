@@ -180,7 +180,7 @@ The simulation has several tuning knobs. If the results feel wrong (too many goa
 - The switch play action weight is multiplied by `0.4` in `select_action` to prevent it dominating midfield. If you want more switch play, raise this multiplier. If games still feel too static in midfield, lower it further.
 
 ### Assisted flag not forcing shots
-- When `game_state.assisted` is `True` in the final third, `select_action` forces a shot. If you want to allow other actions after a cutback (e.g. another dribble), remove the early return block at the top of `select_action`.
+- When `game_state.cutback_assisted` or `game_state.dribble_assisted` is `True` in the final third, `select_action` forces a shot. If you want to allow other actions after a cutback (e.g. another dribble), remove the early return block at the top of `select_action`.
 
 ### MVP from losing team with 0 goals
 - The fallback MVP now picks from the winning team only. If there's a draw, it picks the highest-rated player across both teams. This is handled in `engine.py` after the winner is determined.
@@ -248,6 +248,8 @@ if game_state.momentum[1 - game_state.possessing_team] >= 5:
 ### Changing match length
 
 `total_phases = random.randint(24, 30)` in `engine.py`. Adjust the range to make matches longer or shorter. More phases = more events = higher scores on average.
+
+Note: after the main loop, one extra phase runs if the ball is in `final_third` or `set_piece` to avoid the match ending mid-attack. The `MatchEvent` phase cap (`le=32` in `models.py`) accounts for this.
 
 ---
 

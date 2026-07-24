@@ -11,16 +11,16 @@ def test_players_load():
 
 def test_known_player_lookup():
     player = get_player(231747)
-    assert player.name == "Kylian Mbappé"
+    assert player.name == "K. Mbappé"
     assert player.player_id == 231747
     assert player.overall_rating == 91
 
 def test_stat_mapping():
     player = get_player(231747)
-    assert player.finishing == 94
+    assert player.finishing == 92
     assert player.acceleration == 97
     assert player.dribbling == 92
-    assert player.sprint_speed == 96
+    assert player.sprint_speed == 97
     assert player.composure == 88
     assert player.standing_tackle == 34
     assert player.shot_power == 91
@@ -34,8 +34,8 @@ def test_list_fields_parse():
     assert player.positions == ["ST", "LW", "LM"]
 
     assert isinstance(player.play_styles, list)
-    assert "Quick step" in player.play_styles
-    assert "Finesse shot" in player.play_styles
+    assert "Quick Step" in player.play_styles
+    assert "Finesse Shot" in player.play_styles
 
     assert isinstance(player.specialities, list)
     assert "Speedster" in player.specialities

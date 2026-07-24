@@ -36,6 +36,8 @@ These actions are available when the ball is in the team's own half. The priorit
 
 **Returns:** `PassAttempt(pass_type="short")`
 
+**Note:** The kickoff short pass (when `is_kickoff = True`) always succeeds regardless of the probability roll — a kickoff pass is never intercepted.
+
 ---
 
 ### `long_ball`
@@ -55,11 +57,13 @@ These actions are available when the ball is in the team's own half. The priorit
 - `sprint_speed` — tracking the runner to win the race
 - `jumping` — winning the aerial ball if it's in the air
 
-**Success:** Zone jumps straight to `final_third` — skips midfield entirely
+**Success:** Zone jumps straight to `final_third` — skips midfield entirely. `through_ball_receiver` is set to the named target, locking them in as ball carrier on the next phase.
 
 **Failure:** Possession flips, zone resets to midfield. `turnover_player` on the returned `PassAttempt` is set to the defender's name.
 
 **Returns:** `PassAttempt(pass_type="long")`
+
+**Note:** Not available on kickoff phases — only `short_pass` is available immediately after a goal.
 
 ---
 
@@ -82,7 +86,7 @@ These actions are available when the ball is in the team's own half. The priorit
 - `aggression` — willingness to challenge
 - `standing_tackle` — winning the ball cleanly
 
-**Success:** Zone advances one step
+**Success:** Zone advances one step. A carry `DribbleAttempt` event is also emitted to bridge the zone jump narratively.
 
 **Failure:** Foul check — `roll(defender.aggression / 200)`
 - If foul: zone becomes `set_piece`, possession stays (the fouled team keeps it)
@@ -90,7 +94,9 @@ These actions are available when the ball is in the team's own half. The priorit
 
 The foul check reflects a real football truth: defenders who can't win the ball fairly often resort to fouling. A defender with 90 aggression has a 45% chance of fouling when they fail to win the ball cleanly. A defender with 40 aggression has only a 20% chance.
 
-**Returns:** `DribbleAttempt(success=..., foul=..., turnover_player=...)`
+**Returns:** `[DribbleAttempt(success=True), DribbleAttempt(carry)]` on success; `DribbleAttempt(success=False, foul=..., turnover_player=...)` on failure
+
+**Note:** Not available on kickoff phases — only `short_pass` is available immediately after a goal.
 
 ---
 
@@ -138,11 +144,11 @@ These actions are available when the ball is in the contested central area. The 
 
 **Defender composite:** `standing_tackle, aggression, reactions`
 
-**Success:** Zone advances one step — a successful skill move beats the immediate defender and moves the ball forward one zone (buildup → midfield, midfield → final_third). It does not teleport to the final third from buildup.
+**Success:** Zone advances one step. A carry `DribbleAttempt` event is also emitted to bridge the zone jump narratively.
 
 **Failure:** Same foul check as dribble_carry (`roll(defender.aggression / 200)`). On a clean tackle (no foul), `turnover_player` is set to the defender's name.
 
-**Returns:** `DribbleAttempt(success=..., foul=..., turnover_player=...)`
+**Returns:** `[DribbleAttempt(success=True), DribbleAttempt(carry)]` on success; `DribbleAttempt(success=False, foul=..., turnover_player=...)` on failure
 
 ---
 
@@ -161,7 +167,7 @@ These actions are available when the ball is in the contested central area. The 
 
 **Defender composite:** `strength, standing_tackle, aggression`
 
-**Success:** Zone advances one step, possession stays — winning the physical battle moves the ball forward. A duel win in midfield pushes into the final third; a duel win in buildup pushes into midfield.
+**Success:** Zone advances one step, possession stays — winning the physical battle moves the ball forward. A duel win in midfield pushes into the final third; a duel win in buildup pushes into midfield. A carry `DribbleAttempt` event is emitted immediately after to bridge the zone jump narratively.
 
 **Failure:** Possession flips, zone stays midfield (the ball doesn't go anywhere — it just changes feet in the same area). A `PossessionChange` event is appended after the `PhysicalDuel` event, naming the winning defender and the team that now has possession — e.g. *"Van Dijk wins it back for team A."*
 
@@ -183,7 +189,7 @@ These actions are available when the ball is in the contested central area. The 
 - `sprint_speed` and `acceleration` — tracking across the pitch to cover the switch
 - `reactions` — reading the ball early
 
-**Success:** Zone goes back to `buildup` — the team resets to a better position but doesn't advance. This is correct: switching play creates space, it doesn't create a chance directly.
+**Success:** Zone stays `midfield` — the team resets to a better position on the other flank but does not advance. This is correct: switching play creates space, it doesn't create a chance directly.
 
 **Failure:** Possession flips, zone resets to midfield. `turnover_player` on the returned `PassAttempt` is set to the defender's name.
 
@@ -257,7 +263,7 @@ These actions are available when the ball is in a dangerous attacking position n
 
 **Defender composite:** `interceptions, reactions`
 
-**Success:** Zone stays `final_third`, `game_state.cutback_assisted = True`. The cutback itself doesn't score — it sets up the next action. The next shot taken will receive a +0.15 quality bonus.
+**Success:** Zone stays `final_third`, `game_state.cutback_assisted = True`. `through_ball_receiver` is set to the named recipient and `last_ball_carrier` is set to the passer, locking in the recipient as shooter next phase and suppressing any bridging pass. The next shot taken will receive a +0.15 quality bonus.
 
 **Failure:** Possession flips, zone resets to midfield. `turnover_player` on the returned `PassAttempt` is set to the defender's name.
 
@@ -327,13 +333,13 @@ The taker's `crossing + curve` is compared against the best aerial defender's `j
 |--------|---------------|----------------|
 | short_pass | +1 step | midfield (flip) |
 | long_ball | final_third | midfield (flip) |
-| dribble_carry | +1 step | midfield or set_piece |
+| dribble_carry | +1 step + carry event | midfield or set_piece |
 | through_ball | final_third | midfield (flip) |
-| skill_move | +1 step | midfield or set_piece |
-| physical_duel | +1 step | midfield (flip) |
-| switch_play | buildup | midfield (flip) |
+| skill_move | +1 step + carry event | midfield or set_piece |
+| physical_duel | +1 step + carry event | midfield (flip) |
+| switch_play | midfield | midfield (flip) |
 | cutback | final_third (assisted) | midfield (flip) |
 | dribble_into_box | final_third (assisted) | midfield or set_piece |
-| finesse_shot | midfield (flip) | midfield (flip) |
-| power_shot | midfield (flip) | midfield (flip) |
-| header | midfield (flip) | midfield (flip) |
+| finesse_shot | buildup (flip) on goal; midfield (flip) otherwise | midfield (flip) |
+| power_shot | buildup (flip) on goal; midfield (flip) otherwise | midfield (flip) |
+| header | buildup (flip) on goal; midfield (flip) otherwise | midfield (flip) |

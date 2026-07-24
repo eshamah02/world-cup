@@ -131,13 +131,13 @@ def test_resolve_action_long_ball_success_jumps_to_final_third(strong_team, weak
             successes += 1
     assert successes > 0
 
-def test_resolve_action_switch_play_success_goes_to_buildup(strong_team, weak_team):
+def test_resolve_action_switch_play_success_stays_in_midfield(strong_team, weak_team):
     successes = 0
     for _ in range(100):
         gs = GameState(zone="midfield", possessing_team=0)
         event = resolve_action("switch_play", strong_team[0], weak_team[0], gs, strong_team, weak_team)
         if event.success:
-            assert gs.zone == "buildup"
+            assert gs.zone == "midfield"
             successes += 1
     assert successes > 0
 

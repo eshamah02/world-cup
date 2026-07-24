@@ -42,8 +42,11 @@ def simulate_match(team_a: list[PlayerProfile], team_b: list[PlayerProfile]) -> 
             elif isinstance(event, SpecialEvent) and event.resulted_in_goal:
                 goal_involvements[event.player] = goal_involvements.get(event.player, 0) + 1
 
-    # if the match ends with the ball in the final third, run one extra phase so it resolves
-    if game_state.zone in ("final_third", "set_piece"):
+    # keep running extra phases until the ball leaves the final third or set piece
+    # cap at 4 extra phases to prevent infinite loops
+    extra = 0
+    while game_state.zone in ("final_third", "set_piece") and extra < 4:
+        extra += 1
         for event in resolve_phase(game_state, team_a, team_b):
             text = narrate_event(event, game_state)
             match_events.append(MatchEvent(

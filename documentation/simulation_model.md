@@ -56,18 +56,20 @@ midfield              midfield                  midfield
 
 Key rules:
 - **Possession flips always reset zone to midfield** — the other team starts from a neutral position, not from where they won the ball
-- **Goals reset to midfield with possession to the conceding team** — like a kickoff
-- **Set pieces always return to midfield** — regardless of outcome
-- **Long ball and through ball skip midfield** — they jump straight to final_third on success, reflecting their high-risk high-reward nature
-- **Switch play goes backwards** — success sends the zone back to buildup, because switching the play resets the angle rather than advancing
-- **Physical duel success advances zone and emits a carry event** — winning a 50/50 battle moves the ball forward one step. A carry `DribbleAttempt` is emitted immediately after to bridge the zone jump narratively, so the reader sees the duel win followed by the player surging forward before the next action.
-- **Skill move success advances one step** — a successful trick moves the ball forward one zone, not straight to the final third
+- **Goals reset to buildup with possession to the conceding team** — the next phase is a kickoff. Only `short_pass` is available on the kickoff phase, the kickoff pass always succeeds, and special events cannot fire on the kickoff phase.
+- **Set pieces always return to midfield** — regardless of outcome. Set piece goals also reset to buildup for a kickoff.
+- **Long ball and through ball skip midfield** — they jump straight to final_third on success, reflecting their high-risk high-reward nature. Long ball is not available on kickoff phases.
+- **Switch play stays in midfield** — a successful switch keeps the zone in midfield. The ball is recycled wide to create space but the team does not lose ground.
+- **Physical duel, dribble_carry, and skill_move success advance zone and emit a carry event** — winning a 50/50 battle or beating a defender moves the ball forward one step. A carry `DribbleAttempt` is emitted immediately after to bridge the zone jump narratively, so the reader sees the action followed by the player surging forward before the next phase.
+- **dribble_carry and skill_move are not available on kickoff phases** — only `short_pass` is, preventing fouls or jarring skill-move narratives on the restart.
 
 ---
 
 ## The Phase Loop
 
 A match runs for a randomized number of phases between 24 and 30. Each phase is one tick of the game clock. The randomization means no two matches have exactly the same length, which prevents patterns from feeling mechanical.
+
+After the main loop completes, if the ball is still in `final_third` or `set_piece`, additional phases keep running until the zone resolves out of `final_third` or `set_piece`, capped at 4 extra phases. This prevents the match from ending mid-attack on a turnover in the final third or a pending set piece. The `MatchEvent` phase cap is set to 32 to accommodate these extra phases.
 
 Each phase follows this sequence:
 
@@ -79,7 +81,7 @@ Each phase follows this sequence:
 2. Pick ball carrier from attacking team (weighted by zone-relevant stats)
 3. Pick defender from defending team (weighted by defensive stats)
 
-4. Check for special events
+4. Check for special events (skipped if `last_phase_was_turnover` or `is_kickoff` is True)
    - Brilliance check on ball carrier (~3-5% for elite players) → instant goal, return
    - Error check on ball carrier (~2-5% for average players) → instant turnover, return
 
@@ -95,6 +97,10 @@ Each phase follows this sequence:
 
 The special event check happens before normal action selection. If it fires, the phase ends immediately — no action is selected, no normal resolution happens. This is intentional: special moments bypass the normal flow, which is exactly what makes them feel special.
 
+Special events are blocked on two conditions:
+- `last_phase_was_turnover = True` — a special event cannot fire on the phase immediately after a possession flip via turnover or interception. This prevents a brilliance goal or error from firing the moment a team wins the ball back.
+- `is_kickoff = True` — a special event cannot fire on the kickoff phase after a goal.
+
 The phase number is stamped on the event *before* incrementing — the same pattern as normal actions. This ensures phase numbers are sequential with no gaps or duplicates in the response.
 
 A single phase can return multiple events — a bridging pass plus the main action, or a physical duel plus a carry event. All sub-events within a phase share the same phase number.
@@ -109,11 +115,24 @@ The simulation tracks `game_state.last_ball_carrier` — the name of the player 
 
 Bridging passes are suppressed only when `cutback_assisted=True` — the cutback text already named the recipient. `dribble_assisted` does not suppress the bridging pass because `dribble_into_box` names no recipient, so the bridging pass is still needed to show who receives the ball.
 
-**Through ball receiver lock:** When a through ball succeeds and names a specific receiver, `game_state.through_ball_receiver` is set to that player's name. On the very next phase, `resolve_phase` looks up that player in the attacking team and locks them in as ball carrier, bypassing `pick_ball_carrier`. This ensures the player named as "clean through" is actually the one who acts next. The field is cleared after use and on any possession flip, set piece, or special event.
+**`last_ball_carrier` tracking:** After each phase, `last_ball_carrier` is updated according to these rules:
+- After a successful `short` or `switch` pass: set to the pass *target* (not the passer), so the next phase doesn't re-emit the same pass as a bridging event.
+- After a carry event (duel win, dribble_carry, or skill_move success): set to the dribbler's name — if the next phase picks a different player, a bridging pass fires to show the handoff.
+- After a successful `through_ball`, `long_ball`, or `cutback`: set to the ball carrier (passer), since `through_ball_receiver` handles continuity for these pass types.
+- On any possession flip, set piece, or special event: reset to `""`.
 
-**Named targets on all passes:** Every pass action — `short_pass`, `long_ball`, `through_ball`, `switch_play`, and `cutback` — picks a real receiver name from the rest of the team using `pick_ball_carrier` weighted by zone-relevant stats. The target is used purely for narrative on all passes except `through_ball`, where the receiver is also locked in as ball carrier on the next phase.
+**Receiver lock — `through_ball_receiver`:** Three actions lock in a named player as the next ball carrier via `game_state.through_ball_receiver`:
+- `through_ball` success — the named receiver runs onto the ball in the final third.
+- `long_ball` success — the named runner is locked in for the final third phase.
+- `cutback` success — the named recipient is locked in as the shooter next phase.
 
-**Carry event after duel win:** When a physical duel is won, the zone advances one step. To bridge this zone jump narratively, a `DribbleAttempt` carry event is emitted immediately after the duel event, using an empty defender string to signal it is a carry rather than a contested dribble. This produces a line like *"Fernandes surges forward into the final third"* between the duel win and the next action. `last_ball_carrier` is reset to `""` after a duel win so no additional bridging pass fires on top of the carry.
+On the very next phase, `resolve_phase` looks up that player in the attacking team and locks them in as ball carrier, bypassing `pick_ball_carrier`. `last_ball_carrier` is set to that player's name to suppress any bridging pass. `dribble_assisted` is cleared at this point but `cutback_assisted` is intentionally preserved — clearing it here would cause `select_action` to lose the assisted flag and potentially pick another cutback instead of forcing a shot. The field is cleared after use and on any possession flip, set piece, or special event.
+
+**Ball carrier continuity:** At the start of each phase, if `last_ball_carrier` is set and that player is still on the attacking team, they are locked in as ball carrier. This ensures special events, bridging passes, and actions all fire on the player who actually has the ball rather than a randomly picked teammate.
+
+**Named targets on all passes:** Every pass action — `short_pass`, `long_ball`, `through_ball`, `switch_play`, and `cutback` — picks a real receiver name from the rest of the team using `pick_ball_carrier` weighted by zone-relevant stats.
+
+**Carry event after duel win, dribble_carry, or skill_move:** When a physical duel is won, or when a `dribble_carry` or `skill_move` succeeds, the zone advances one step. To bridge this zone jump narratively, a `DribbleAttempt` carry event is emitted immediately after the main event, using an empty defender string to signal it is a carry rather than a contested dribble. This produces a line like *"Fernandes surges forward into the final third"* between the action and the next phase. After a carry event, `last_ball_carrier` is set to the dribbler's name so that if the next phase picks a different player, a bridging pass fires correctly to show the handoff.
 
 **Possession-flip narrative:** When possession changes, the reader needs to know who won the ball and which team now has it — not just that the previous action failed.
 
@@ -121,7 +140,9 @@ Bridging passes are suppressed only when `cutback_assisted=True` — the cutback
 
 - **Duel losses:** After a `PhysicalDuel` where the defender wins, `resolve_phase` appends a `PossessionChange` event naming the winner and the new possessing team. This produces a follow-up line like *"Van Dijk wins it back for team A"* immediately after the duel narrative, closing the gap between "who won the duel" and "who now has the ball."
 
-**Resets:** `last_ball_carrier` is reset to `""` on any possession flip, set piece, special event, or duel win — any situation where the narrative context changes enough that a bridging pass would be misleading.
+**Team name labels:** `GameState.team_names` holds display labels for each team, derived from player surnames at match start by `engine.py` (e.g. `"Mbappé & Foden & Júnior"`). The narrative layer reads these via `_team_label()` to produce natural-sounding possession descriptions — *"Fernandes wins it back for De Bruyne & Lewandowski & Fernandes"* — instead of generic *"team B"*.
+
+**Resets:** `last_ball_carrier` is reset to `""` on any possession flip, set piece, special event, or carry event — any situation where the narrative context changes enough that a bridging pass would be misleading.
 
 ---
 
@@ -158,7 +179,12 @@ This prevents the narrative mismatch of a foul on a player producing a corner in
 
 ## The Assisted Flags
 
-Two boolean flags track whether the current attacking move has created a premium shooting opportunity:
+Two additional boolean flags control phase behaviour:
+
+- `last_phase_was_turnover` — set to `True` whenever possession flips via a turnover, interception, dribble loss, or error special event. Set to `False` on normal possession-maintained phases and after brilliance goals. Used to block special events from firing immediately after a turnover.
+- `is_kickoff` — set to `True` after every goal (outfield shot, free kick, or corner). Cleared after the first successful possession-maintained phase. While `True`: only `short_pass` is available in buildup, the short pass always succeeds, and special events are blocked.
+
+
 
 - `cutback_assisted` — set to `True` by a successful cutback. The cutback text names the recipient, so the bridging pass is suppressed on the next phase.
 - `dribble_assisted` — set to `True` by a successful `dribble_into_box`. The dribble text names no recipient, so the bridging pass is NOT suppressed — it still fires to show who receives.
@@ -170,6 +196,10 @@ When either flag is `True` and the zone is `final_third`, `select_action` forces
 ## Special Events
 
 Every phase has a small probability of a special event firing before normal resolution. There are two types:
+
+**Special events are blocked on two conditions:**
+- `last_phase_was_turnover = True` — a special event cannot fire on the phase immediately after a possession flip via turnover or interception. This prevents a brilliance goal or error from firing the moment a team wins the ball back.
+- `is_kickoff = True` — a special event cannot fire on the kickoff phase after a goal.
 
 **Brilliance** — a moment of individual genius. The ball carrier does something extraordinary that bypasses the normal action flow entirely and scores. Probability formula: `(overall_rating + skill_moves + composure) / 9000`. For an elite player (91 overall, 100 skill_moves, 88 composure) this is approximately 3.1% per phase. Over a 27-phase match, that's roughly a 57% chance of at least one brilliance moment — which feels right for a match featuring world-class players.
 

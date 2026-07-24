@@ -149,14 +149,25 @@ class GameState:
     last_ball_carrier: str = ""
     # Name of the player who ended the previous phase with the ball.
     # Used to emit bridging pass events when the ball carrier changes within
-    # the same possession. Reset to "" on possession flip, set piece,
-    # special event, or physical duel win.
+    # the same possession.
+    # After a successful short or switch pass, set to the pass target (not the passer)
+    # so the next phase doesn't re-emit the same pass as a bridging event.
+    # After a duel win, the carry event already bridges the zone jump — reset to ""
+    # so the next phase picks freely with no bridging pass.
+    # Also reset to "" on possession flip, set piece, special event.
 
     through_ball_receiver: str = ""
-    # Name of the player who was named as the receiver of a successful through ball.
-    # On the very next phase, this player is locked in as ball carrier instead of
-    # calling pick_ball_carrier, ensuring the named runner actually gets the ball.
+    # Name of the player locked in as ball carrier for the next phase.
+    # Set by: successful through_ball, successful long_ball, successful cutback.
+    # On the very next phase, resolve_phase looks up this player in the attacking
+    # team and locks them in as ball carrier, bypassing pick_ball_carrier.
     # Cleared after use and on any possession flip, set piece, or special event.
+
+    team_names: list[str] = field(default_factory=lambda: ["team A", "team B"])
+    # Display labels for each team, derived from player surnames at match start.
+    # e.g. ["Mbappé & Foden & Júnior", "De Bruyne & Lewandowski & Fernandes"]
+    # Used by narrative.py to name the possessing team in turnover and
+    # possession-change templates instead of generic "team A" / "team B".
 ```
 
 **Mutation pattern:** `GameState` is mutated in place by `resolve_action` and `resolve_set_piece`. The caller (`resolve_phase`) passes it in and reads the updated state after the call returns. This means the state flows through the entire match as a single shared object — no copying, no returning new state objects.
@@ -304,9 +315,9 @@ The `Field(ge=3, le=3)` constraint enforces exactly 3 players per team at the Py
 One event in the play-by-play, as returned to the frontend.
 ```python
 class MatchEvent(BaseModel):
-    phase: int          # 1-indexed phase number (ge=1, le=30)
+    phase: int          # 1-indexed phase number (ge=1, le=32)
     zone: str           # zone where the event occurred
-    event_type: str     # "pass", "dribble", "shot", "duel", "set_piece", "special"
+    event_type: str     # "pass", "dribble", "shot", "duel", "set_piece", "special", "possession_change"
     outcome: str        # event-specific outcome string
     text: str           # human-readable narrative text
     score: list[int]    # score at the time of this event, read from event.score
