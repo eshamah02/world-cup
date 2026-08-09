@@ -170,6 +170,6 @@ def search_players(query: str) -> List[PlayerProfile]:
                ]
     return matches
 
-def get_random_players(n: int = 3) -> List[PlayerProfile]:
+def get_random_player(n: int = 3) -> List[PlayerProfile]:
     if _players:
         return random.sample(list(_players.values()), k=n)
