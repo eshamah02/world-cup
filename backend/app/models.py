@@ -17,7 +17,7 @@ class PlayerSummary(BaseModel):
     player_id: int 
     name: str
     image: str
-    overall_rating: str
+    overall_rating: int
     club_name: str
     country_name: str
     positions: list[str]

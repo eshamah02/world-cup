@@ -2,7 +2,9 @@
 import pandas as pd
 import random
 from app.player_profile import PlayerProfile
+from app.models import PlayerSummary, PlayerDetail
 from typing import List
+
 
 FILE_PATH = 'data/FC26_20250921.csv'
 
@@ -173,3 +175,75 @@ def search_players(query: str) -> List[PlayerProfile]:
 def get_random_player(n: int = 3) -> List[PlayerProfile]:
     if _players:
         return random.sample(list(_players.values()), k=n)
+
+
+def filter_players(players: List[PlayerProfile], query: str = None, position: str = None, country=None, club=None,
+                    min_rating=None, max_rating=None) -> List[PlayerProfile]:
+    result = []
+    for p in players:
+        if query:
+            q = query.lower()
+            name = p.name.lower()
+            club_l = p.club_name.lower() if isinstance(p.club_name, str) else ""
+            country_l = p.country_name.lower() if isinstance(p.country_name, str) else ""
+            if q not in name and q not in club_l and q not in country_l:
+                continue
+        if position and position not in p.positions:
+            continue
+        if country and (not isinstance(p.country_name, str) or country.lower() != p.country_name.lower()):
+            continue
+        if club and (not isinstance(p.club_name, str) or club.lower() != p.club_name.lower()):
+            continue
+        if min_rating is not None and p.overall_rating < min_rating:
+            continue
+        if max_rating is not None and p.overall_rating > max_rating:
+            continue
+        result.append(p)
+    return result
+            
+
+def to_summary(profile: PlayerProfile) -> PlayerSummary:
+    return PlayerSummary(
+        player_id=profile.player_id,
+        name=profile.name,
+        image=profile.image,
+        overall_rating=profile.overall_rating,
+        club_name=profile.club_name,
+        country_name=profile.country_name,
+        positions=profile.positions
+    )
+
+def to_detail(profile: PlayerProfile) -> PlayerDetail:
+    return PlayerDetail(
+        player_id=profile.player_id,
+        name=profile.name,
+        full_name=profile.full_name,
+        image=profile.image,
+        country_name=profile.country_name,
+        club_name=profile.club_name,
+        positions=profile.positions,
+        overall_rating=profile.overall_rating,
+        pace={"acceleration": profile.acceleration, "sprint_speed": profile.sprint_speed},
+        shooting={"finishing": profile.finishing, "shot_power": profile.shot_power, "long_shots": profile.long_shots, "volleys": profile.volleys, "penalties": profile.penalties},
+        passing={"short_passing": profile.short_passing, "long_passing": profile.long_passing, "vision": profile.vision, "crossing": profile.crossing, "fk_accuracy": profile.fk_accuracy},
+        dribbling={"dribbling": profile.dribbling, "ball_control": profile.ball_control, "agility": profile.agility, "balance": profile.balance, "reactions": profile.reactions},
+        defending={"defensive_awareness": profile.defensive_awareness, "standing_tackle": profile.standing_tackle, "sliding_tackle": profile.sliding_tackle, "interceptions": profile.interceptions},
+        physical={"strength": profile.strength, "stamina": profile.stamina, "jumping": profile.jumping, "aggression": profile.aggression},
+    )
+
+
+def resolve_random_entries(entries: List[int | str]) -> List[PlayerProfile]:
+    used_ids = set()
+    resolved = []
+    all_players = get_all_players()
+    for entry in entries:
+        if entry == "random":
+            candidates = [p.player_id for p in all_players if p.player_id not in used_ids]
+            chosen = random.choice(candidates)
+            resolved.append(chosen)
+            used_ids.add(chosen)
+        else:
+            resolved.append(entry)
+            used_ids.add(entry)
+    return resolved
+
