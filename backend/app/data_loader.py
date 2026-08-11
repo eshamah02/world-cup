@@ -162,15 +162,7 @@ def get_all_players(path: str=FILE_PATH) -> List[PlayerProfile]:
     else:
         load_players(path)
         return list(_players.values())
-    
-def search_players(query: str) -> List[PlayerProfile]:
-    q = query.lower()
-    matches = [player for player in _players.values() 
-               if q in player.name.lower()
-               or (isinstance(player.club_name, str) and q in player.club_name.lower())
-               or (isinstance(player.country_name, str) and q in player.country_name.lower())
-               ]
-    return matches
+
 
 def get_random_player(n: int = 3) -> List[PlayerProfile]:
     if _players:

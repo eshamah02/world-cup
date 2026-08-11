@@ -1,5 +1,5 @@
 import pytest
-from app.data_loader import load_players, get_player, get_all_players, search_players
+from app.data_loader import load_players, get_player, get_all_players
 
 # Run pytest test/test_data_loader.py -v
 # to test with this file
@@ -46,20 +46,6 @@ def test_list_fields_parse():
 def test_invalid_id_raises():
     with pytest.raises(ValueError):
         get_player(9999999)
-
-def test_search_finds_player():
-    results = search_players("Mbappé")
-    assert len(results) > 0
-
-    assert any("Mbappé" in p.name for p in results)
-
-def test_search_case_insensitive():
-    results = search_players('mbappé')
-    assert len(results) > 0
-
-def test_search_no_results():
-    results = search_players("ThisShouldNotMatchAnything")
-    assert not results
 
 def test_numeric_fields_are_int():
     player = get_player(231747)

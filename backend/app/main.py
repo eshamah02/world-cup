@@ -2,11 +2,10 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.data_loader import load_players, get_player, search_players, get_all_players
-from app.models import MatchRequest, MatchResponse, MatchEvent, PlayerSummary
+from app.data_loader import load_players, get_player, get_all_players, filter_players, to_summary, to_detail, resolve_random_entries
+from app.models import MatchRequest, MatchResponse, MatchEvent, PlayerSummary, PlayerListResponse, PlayerDetail
 from app.simulation.engine import simulate_match
 
-from dataclasses import asdict
 from contextlib import asynccontextmanager
 import uvicorn
 
@@ -24,50 +23,63 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/players")
+def list_players(
+    page: int = 1,
+    page_size: int = 20,
+    query: str | None = None,
+    position: str | None = None,
+    country: str | None = None,
+    club: str | None = None,
+    min_rating: int | None = None,
+    max_rating: int | None = None
+) -> PlayerListResponse:
+    page = max(1, page)
+    page_size = min(100, max(1, page_size))
 
-@app.get("/players/search")
-def search(query: str) -> list[PlayerSummary]:
-    res = search_players(query)
-    
-    if res is None:
-        raise HTTPException(status_code=404, detail="No players found")
-    
-    player_summaries = []
-    for player in res:
-        summary = PlayerSummary(
-            player_id=player.player_id,
-            name=player.name,
-            image=player.image,
-            overall_rating=str(player.overall_rating),
-            club_name=player.club_name,
-            country_name=player.country_name,
-            positions=player.positions
-        )
-        player_summaries.append(summary)
-    return player_summaries
+    filtered = filter_players(
+        get_all_players(),
+        query=query,
+        position=position,
+        country=country,
+        club=club,
+        min_rating=min_rating,
+        max_rating=max_rating
+    )
 
+    total = len(filtered)
+    start = (page - 1) * page_size
+    window = filtered[start:start + page_size]
+    items = [to_summary(p) for p in window]
+    return PlayerListResponse(items=items, total=total, page=page, page_size=page_size)
 
 @app.get("/players/{player_id}")
-def get_player_profile(player_id: int) -> PlayerSummary:
-    res = get_player(player_id)
-    if res is None:
+def get_player_profile(player_id: int) -> PlayerDetail:
+    try:
+        player = get_player(player_id)
+    except ValueError:
         raise HTTPException(status_code=404, detail="Player not found")
-    
-    return asdict(res)
+    return to_detail(player)
+
 
 @app.post("/simulate")
 def simulate(request: MatchRequest) -> MatchResponse:
-    all_players = request.team_a + request.team_b
-    if len(all_players) != len(set(all_players)):
+    entries = request.team_a + request.team_b 
+    explicit = [e for e in entries if e != "random"]
+
+    if len(explicit) != len(set(explicit)):
         raise HTTPException(status_code=400, detail="Duplicate players in teams")
 
-    try:
-        team_a_players = [get_player(pid) for pid in request.team_a]
-        team_b_players = [get_player(pid) for pid in request.team_b]
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    for pid in explicit:
+        try:
+            get_player(pid)
+        except ValueError:
+            raise HTTPException(status_code=404, detail=f"Player with id {pid} not found")
 
-    return simulate_match(team_a_players, team_b_players)
+    resolved = resolve_random_entries(entries)
+    players = [get_player(pid) for pid in resolved]
+    return simulate_match(players[:3], players[3:])
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, log_level="info")

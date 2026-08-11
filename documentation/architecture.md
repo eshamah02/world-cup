@@ -57,7 +57,6 @@ world-cup/
 - `load_players()` — reads the CSV, populates `_players`
 - `get_player()` — lookup by ID, raises `ValueError` if not found
 - `get_all_players()` — returns all players
-- `search_players()` — name/club/country substring search
 
 **When it runs:** `load_players()` is called once at app startup via the FastAPI lifespan handler. After that, all lookups are in-memory dictionary reads — O(1) per player.
 
@@ -84,7 +83,6 @@ world-cup/
 **What it contains:**
 - App initialization with CORS middleware
 - Lifespan handler that calls `load_players()` at startup
-- `GET /players/search?q=` — player search
 - `GET /players/{player_id}` — single player lookup
 - `POST /simulate` — accepts `MatchRequest`, fetches players, runs simulation, returns `MatchResponse`
 

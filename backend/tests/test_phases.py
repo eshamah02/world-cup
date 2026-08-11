@@ -57,8 +57,10 @@ def test_resolve_action_through_ball_returns_pass_attempt(strong_team, weak_team
 
 def test_resolve_action_dribble_returns_dribble_attempt(strong_team, weak_team):
     gs = GameState(zone="midfield")
-    event = resolve_action("dribble_carry", strong_team[0], weak_team[0], gs, strong_team, weak_team)
-    assert isinstance(event, DribbleAttempt)
+    result = resolve_action("dribble_carry", strong_team[0], weak_team[0], gs, strong_team, weak_team)
+    events = result if isinstance(result, list) else [result]
+    assert len(events) > 0
+    assert all(isinstance(e, DribbleAttempt) for e in events)
 
 def test_resolve_action_shot_returns_shot_attempt(strong_team, weak_team):
     gs = GameState(zone="final_third")

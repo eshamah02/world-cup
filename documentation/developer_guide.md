@@ -73,11 +73,6 @@ curl -X POST http://localhost:8000/simulate \
 
 Or open `http://localhost:8000/docs` in your browser — FastAPI auto-generates a Swagger UI where you can paste the request body and click Execute.
 
-If you don't know player IDs, search first:
-```bash
-curl "http://localhost:8000/players/search?q=mbappe"
-```
-
 **Response:**
 ```json
 {
@@ -107,9 +102,6 @@ curl "http://localhost:8000/players/search?q=mbappe"
 
 > Note: `team_a` and `team_b` must each contain exactly 3 player IDs.
 
-### `GET /players/search?q=mbappe`
-Returns a list of `PlayerSummary` objects matching the query. Searches name, club, and country.
-
 ### `GET /players/{player_id}`
 Returns full player details as a dict.
 
@@ -121,7 +113,7 @@ Tests are organized by file, each testing one layer of the system:
 
 | Test file | Tests |
 |-----------|-------|
-| `test_data_loader.py` | CSV loading, player lookup, search, field types |
+| `test_data_loader.py` | CSV loading, player lookup, field types |
 | `test_probability.py` | Math functions, probability distributions, edge cases |
 | `test_phases.py` | Player selection, action selection, action resolution, phase orchestration |
 | `test_engine.py` | Full match simulation, response structure, score validity |
