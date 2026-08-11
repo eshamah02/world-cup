@@ -4,7 +4,7 @@ import PlayerImage from './PlayerImage'
 function RemoveButton({ onClick }) {
     return (
         <button onClick={onClick} aria-label="Remove" className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white">
-            x
+            ×
         </button>
     )
 }
