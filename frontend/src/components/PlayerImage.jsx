@@ -1,8 +1,8 @@
 
-function PlayerImage({player_src, country_src = null}) {
+function PlayerImage({ player_src, country_src = null }) {
     return (
         <div className="relative inline-block">
-            <img 
+            <img
                 src={player_src}
                 alt={'Image'}
                 loading="lazy"
